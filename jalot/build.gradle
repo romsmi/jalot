@@ -30,17 +30,11 @@ dependencies {
     testCompile 'junit:junit:4.12'
 }
 
-import org.gradle.api.java.archives.internal.DefaultManifest
-import org.gradle.api.internal.file.IdentityFileResolver
 
-File manifestFile = file('build/tmp/jar/MANIFEST.MF')
-
-task generateManifest << {
-   manifest = new DefaultManifest(new IdentityFileResolver())
-
-   // add some attributes
-   manifest.attributes(["attr1":"value1", "attr2":"value2"])
-
-   // write it to a file
-   manifest.writeTo(manifestFile)
+jar {
+    manifest.attributes(
+            'Class-Path': configurations.runtime.files.collect { it.name }.join(' '),
+            'Premain-Class': 'agent.Agent',
+            'Boot-Class-Path': 
+    )
 }
