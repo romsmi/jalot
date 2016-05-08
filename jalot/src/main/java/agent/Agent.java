@@ -13,6 +13,8 @@ import java.util.List;
 
 import org.apache.logging.log4j.Logger;
 
+import com.jamonapi.Monitor;
+
 import javassist.CannotCompileException;
 import javassist.ClassPool;
 import javassist.CtClass;
@@ -25,11 +27,14 @@ import javassist.bytecode.AccessFlag;
 public class Agent implements ClassFileTransformer
 {
  
-    private static final boolean MAIN = false;
-    private static final boolean PUBLIC = false;
+    private static final boolean MAIN_ONLY = false;
+    private static final boolean PUBLIC_ONLY = false;
     
     
     private static final String LOG_LEVEL_DEBUG = "debug";
+    private static final String LOG_LEVEL_INFO = "info";
+    private static final String LOG_LEVEL_ERROR = "error";
+    private static final String LOG_LEVEL_FATAL = "fatal";
     private final static String QUOTE = "\"";
 
     private static final String LOG_LEVEL = LOG_LEVEL_DEBUG;
@@ -37,9 +42,9 @@ public class Agent implements ClassFileTransformer
     private static ArrayList<String> blackList;
     private static ArrayList<String> whiteList;
     
+    private static boolean monitorDesired;
+    
     static {
-        
-       
         
         List<String> linesBlack = null;
         List<String> linesWhite = null;
@@ -100,7 +105,6 @@ public class Agent implements ClassFileTransformer
         pool.importPackage("org.apache.logging.log4j");
         pool.importPackage("com.jamonapi");
         
-
         //--- Start filtering
         filterClasses: {
             for (String entry : blackList)
@@ -133,7 +137,7 @@ public class Agent implements ClassFileTransformer
 //                    CtClass cc = pool.get(className);
                     CtClass cc = ctClass;
                     CtClass ctLogger = pool.get(Logger.class.getCanonicalName());
-                    CtField f = new CtField(ctLogger, "_logger", cc);
+                    CtField f = new CtField(ctLogger, "_jalot_logger", cc);
                     f.setModifiers(Modifier.PRIVATE);
                     f.setModifiers(Modifier.STATIC);
                     cc.addField(f);
@@ -153,7 +157,6 @@ public class Agent implements ClassFileTransformer
                     }
                 }
                 bytes = ctClass.toBytecode();
-                
             }
         }
         catch (Exception e)
@@ -174,11 +177,19 @@ public class Agent implements ClassFileTransformer
     {
         
         String methodName = method.getMethodInfo().getName();
+        monitorDesired = isMonitorDesired(method, methodName);
 
         String before = "";
         String after = "";
 
+        //
         ClassPool pool = ClassPool.getDefault();
+        CtClass ctMonitor = pool.get(Monitor.class.getCanonicalName());
+        CtField f = new CtField(ctMonitor, "_jalot_monitor_"+methodName, ctClass);
+        f.setModifiers(Modifier.PRIVATE);
+        f.setModifiers(Modifier.STATIC);
+        ctClass.addField(f);
+        //
         
         before = before(methodName, before);
         after = after(methodName, after);
@@ -193,10 +204,10 @@ public class Agent implements ClassFileTransformer
     private boolean isMonitorDesired(CtMethod method, String methodName)
     {
         boolean isPublic = false; 
-        if (PUBLIC) {
+        if (PUBLIC_ONLY) {
             isPublic = method.getMethodInfo().getAccessFlags() == AccessFlag.PUBLIC;   
         }
-        return (MAIN && methodName.equals("main")) || (!MAIN && PUBLIC && isPublic) || (!MAIN && !PUBLIC);
+        return (MAIN_ONLY && methodName.equals("main")) || (!MAIN_ONLY && PUBLIC_ONLY && isPublic) || (!MAIN_ONLY && !PUBLIC_ONLY);
     }
 
     private String before(String methodName, String before)
@@ -204,17 +215,20 @@ public class Agent implements ClassFileTransformer
         StringBuffer sb = new StringBuffer(before);
         sb.append("{");
         
-        sb.append("if (_logger == null) _logger = LogManager.getLogger();");
-        sb.append("String _params = ").append(QUOTE).append(QUOTE).append(";");
-        sb.append("for (int i = 0; i < $args.length; i++) {_params += String.valueOf($args[i]) + \", \";}");
-        sb.append("_logger.").append(LOG_LEVEL).append("(")
+        sb.append("if (_jalot_logger == null) _jalot_logger = LogManager.getLogger();");
+        sb.append("String _jalot_params = ").append(QUOTE).append(QUOTE).append(";");
+        sb.append("for (int i = 0; i < $args.length; i++) {_jalot_params += String.valueOf($args[i]) + \", \";}");
+        sb.append("_jalot_logger.").append(LOG_LEVEL).append("(")
         .append(QUOTE).append("->]  {}({})").append(QUOTE).append(", ")
         .append("new Object[] {")
         .append(QUOTE).append(methodName).append(QUOTE).append(", ")
-        .append("_params.substring(0, _params.length() > 1 ? _params.length() - 2 : _params.length())")
+        .append("_jalot_params.substring(0, _jalot_params.length() > 1 ? _jalot_params.length() - 2 : _jalot_params.length())")
         .append("}")
         .append(");");
         
+        if (monitorDesired) {
+            sb.append("_jalot_monitor_").append(methodName).append(" = MonitorFactory.start(\"").append(methodName).append("\");");
+        } 
         sb.append("}");
         
         
@@ -226,28 +240,45 @@ public class Agent implements ClassFileTransformer
         StringBuffer sb = new StringBuffer(after);
         sb.append("{");
         
+        sb.append("Monitor _jalot_monitor_dur = null;");
+        if (monitorDesired) {
+            sb.append("_jalot_monitor_dur = _jalot_monitor_").append(methodName).append(".stop();");
+        } 
         
         sb.append("StackTraceElement[] stackTraceElements = Thread.currentThread().getStackTrace();");
-        sb.append("String _caller = \"_unknown_\";");
+        sb.append("String _jalot_caller = \"_unknown_\";");
         
         sb.append("if (stackTraceElements.length > 2)  { ");
         sb.append(" StackTraceElement stackTraceElement = stackTraceElements[2];");
-        sb.append(" _caller = stackTraceElement.getClassName(); ");
+        sb.append(" _jalot_caller = stackTraceElement.getClassName(); ");
         sb.append("}");
 
-        sb.append("String _params = ").append(QUOTE).append(QUOTE).append(";");
+        sb.append("String _jalot_params = ").append(QUOTE).append(QUOTE).append(";");
         sb.append("for (int i = 0; i < $args.length; i++) {");
-        sb.append("_params += String.valueOf($args[i]) + \", \";");//single method input param
+        sb.append("_jalot_params += String.valueOf($args[i]) + \", \";");//single method input param
         sb.append("}");
         
-        sb.append("_logger.").append(LOG_LEVEL).append("(")
+        sb.append("_jalot_logger.").append(LOG_LEVEL).append("(")
         .append(QUOTE).append("[->  {}({}) => {} [caller: {}, duration: {} ms.]").append(QUOTE).append(", ")
         .append("new Object[] {")
         .append(QUOTE).append(methodName).append(QUOTE).append(", ")//method name
-        .append("_params.substring(0, _params.length() > 1 ? _params.length() - 2 : _params.length())").append(", ")//method params without trailing comma
+        .append("_jalot_params.substring(0, _jalot_params.length() > 1 ? _jalot_params.length() - 2 : _jalot_params.length())").append(", ")//method params without trailing comma
         .append("String.valueOf($_)").append(", ")//return value
-        .append("_caller")
+        .append("_jalot_caller");
+        if (monitorDesired) {
+            sb.append(", ")//caller
+            .append("String.valueOf(_jalot_monitor_dur.getLastValue())");//duration
+        } 
+        sb.append("}")
         .append(");");
+        
+        if (methodName.equals("main")) {
+            sb.append("String _jalot_report = MonitorFactory.getRootMonitor().getReport(4, \"desc\");");
+            sb.append("_jalot_logger.").append(LOG_LEVEL).append("(\"").append("___________________________________ performance report ___________________________________").append("\");");
+            sb.append("_jalot_logger.").append(LOG_LEVEL).append("(\"").append("---8<-----------------8<-----------------8<-----------------8<-----------------8<--------------").append("\");");
+            sb.append("_jalot_logger.").append(LOG_LEVEL).append("(").append("_jalot_report").append(");");
+            sb.append("_jalot_logger.").append(LOG_LEVEL).append("(\"").append("--->8----------------->8----------------->8----------------->8----------------->8--------------").append("\");");
+        }
         
         sb.append("}");
         
