@@ -17,9 +17,12 @@ repositories {
     jcenter()
 }
 
+//print(System.properties['java.home'])
+
 // In this section you declare the dependencies for your production and test code
 dependencies {
     // The production code uses the SLF4J logging API at compile time
+    compile files("${System.properties['java.home']}/lib/tools.jar")
     compile 'org.slf4j:slf4j-api:1.7.21'
     compile 'org.javassist:javassist:3.20.0-GA'
     compile 'org.apache.logging.log4j:log4j-core:2.5'
@@ -38,6 +41,6 @@ jar {
     manifest.attributes(
             'Class-Path': configurations.runtime.files.collect { it.name }.join(' '),
             'Premain-Class': 'agent.Agent',
-            'Boot-Class-Path': ''
+            'Boot-Class-Path': 'javassist-3.20.0-GA.jar'
     )
 }
