@@ -11,6 +11,7 @@ import java.security.ProtectionDomain;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+
 import org.apache.logging.log4j.Logger;
 
 import com.jamonapi.Monitor;
@@ -41,7 +42,8 @@ public class Agent implements ClassFileTransformer {
 	private static ArrayList<String> whiteList;
 
 	private static boolean monitorDesired;
-	private String _monitor_method;
+	private String _var_monitor;
+
 	private Random random = new Random();
 
 	static {
@@ -156,11 +158,8 @@ public class Agent implements ClassFileTransformer {
 
 	private void transformMethod(CtClass ctClass, CtMethod method) throws NotFoundException, CannotCompileException {
 
-		String methodName = method.getMethodInfo().getName();
-		// String methodName = method.getLongName();//TODO gibt noch Fehler
-		// wenns eingeschaltet
-		// System.out.println("##################"+methodName);
-		_monitor_method = new StringBuilder("_jalot_monitor_").append(methodName).append("_")
+		String methodName = method.getLongName();
+		_var_monitor = new StringBuilder("_jalot_monitor_").append(method.getMethodInfo().getName()).append("_")
 				.append(Integer.toString(random.nextInt(99999))).toString();
 
 		monitorDesired = isMonitorDesired(method, methodName);
@@ -170,7 +169,7 @@ public class Agent implements ClassFileTransformer {
 
 		ClassPool pool = ClassPool.getDefault();
 		CtClass ctMonitor = pool.get(Monitor.class.getCanonicalName());
-		CtField f = new CtField(ctMonitor, _monitor_method, ctClass);
+		CtField f = new CtField(ctMonitor, _var_monitor, ctClass);
 		f.setModifiers(Modifier.PRIVATE);
 		f.setModifiers(Modifier.STATIC);
 		ctClass.addField(f);
@@ -200,13 +199,13 @@ public class Agent implements ClassFileTransformer {
 		sb.append("if (_jalot_logger == null) _jalot_logger = LogManager.getLogger();");
 		sb.append("String _jalot_params = ").append(QUOTE).append(QUOTE).append(";");
 		sb.append("for (int i = 0; i < $args.length; i++) {_jalot_params += String.valueOf($args[i]) + \", \";}");
-		sb.append("_jalot_logger.").append(LOG_LEVEL).append("(").append(QUOTE).append("->]  {}({})").append(QUOTE)
+		sb.append("_jalot_logger.").append(LOG_LEVEL).append("(").append(QUOTE).append("->]  {} [f({})]").append(QUOTE)
 				.append(", ").append("new Object[] {").append(QUOTE).append(methodName).append(QUOTE).append(", ")
 				.append("_jalot_params.substring(0, _jalot_params.length() > 1 ? _jalot_params.length() - 2 : _jalot_params.length())")
 				.append("}").append(");");
 
 		if (monitorDesired) {
-			sb.append(_monitor_method).append(" = MonitorFactory.start(\"").append(methodName).append("\");");
+			sb.append(_var_monitor).append(" = MonitorFactory.start(\"").append(methodName).append("\");");
 		}
 		sb.append("}");
 
@@ -219,11 +218,11 @@ public class Agent implements ClassFileTransformer {
 
 		sb.append("Monitor _jalot_monitor_dur = null;");
 		if (monitorDesired) {
-			sb.append("_jalot_monitor_dur = ").append(_monitor_method).append(".stop();");
+			sb.append("_jalot_monitor_dur = ").append(_var_monitor).append(".stop();");
 		}
 
 		sb.append("StackTraceElement[] stackTraceElements = Thread.currentThread().getStackTrace();");
-		sb.append("String _jalot_caller = \"_unknown_\";");
+		sb.append("String _jalot_caller = \" - \";");
 
 		sb.append("if (stackTraceElements.length > 2)  { ");
 		sb.append(" StackTraceElement stackTraceElement = stackTraceElements[2];");
@@ -232,16 +231,13 @@ public class Agent implements ClassFileTransformer {
 
 		sb.append("String _jalot_params = ").append(QUOTE).append(QUOTE).append(";");
 		sb.append("for (int i = 0; i < $args.length; i++) {");
-		sb.append("_jalot_params += String.valueOf($args[i]) + \", \";");// single
-		// method
-		// input
-		// param
+		sb.append("_jalot_params += String.valueOf($args[i]) + \", \";");// single method input param
 		sb.append("}");
 
 		sb.append("_jalot_logger.").append(LOG_LEVEL).append("(").append(QUOTE)
-				.append("[->  {}({}) => {} [caller: {}, duration: {} ms.]").append(QUOTE).append(", ")
+				.append("[->  {} [f({}):{}, caller:{}, duration:{} ms.]").append(QUOTE).append(", ")
 				.append("new Object[] {").append(QUOTE).append(methodName).append(QUOTE).append(", ")// method
-				// name
+																										// name
 				.append("_jalot_params.substring(0, _jalot_params.length() > 1 ? _jalot_params.length() - 2 : _jalot_params.length())")
 				.append(", ")// method params without trailing comma
 				.append("String.valueOf($_)").append(", ")// return value
@@ -252,7 +248,7 @@ public class Agent implements ClassFileTransformer {
 		}
 		sb.append("}").append(");");
 
-		if (methodName.equals("main")) {
+		if (methodName.contains(".main(java.lang.String[])")) {
 			sb.append("String _jalot_report = MonitorFactory.getRootMonitor().getReport(4, \"desc\");");
 			sb.append("_jalot_logger.").append(LOG_LEVEL).append("(\"")
 					.append("___________________________________ performance report ___________________________________")
