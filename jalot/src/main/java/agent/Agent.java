@@ -221,13 +221,8 @@ public class Agent implements ClassFileTransformer {
 			sb.append("_jalot_monitor_dur = ").append(_var_monitor).append(".stop();");
 		}
 
-		sb.append("StackTraceElement[] stackTraceElements = Thread.currentThread().getStackTrace();");
-		sb.append("String _jalot_caller = \" - \";");
-
-		sb.append("if (stackTraceElements.length > 2)  { ");
-		sb.append(" StackTraceElement stackTraceElement = stackTraceElements[2];");
-		sb.append(" _jalot_caller = stackTraceElement.getClassName(); ");
-		sb.append("}");
+		sb.append("Class _jalot_reflcc = sun.reflect.Reflection.getCallerClass(2);");
+		sb.append("String _jalot_caller = _jalot_reflcc != null ? _jalot_reflcc.getName() : \"N/A\";");
 
 		sb.append("String _jalot_params = ").append(QUOTE).append(QUOTE).append(";");
 		sb.append("for (int i = 0; i < $args.length; i++) {");
